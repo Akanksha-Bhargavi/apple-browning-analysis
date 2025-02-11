@@ -1,0 +1,183 @@
+---
+title: "apple-browning-analysis"
+date: "2024-03-30"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+# Loading required libraries
+knitr::opts_chunk$set(echo = TRUE)
+library(daewr)
+library(gmodels)
+library(car)
+library(MASS)
+library(ggplot2)
+library(lme4)
+library(sjPlot)
+library(lsmeans)
+
+# Load dataset
+data(apple)
+head(apple)
+
+# Check for missing values
+sum(is.na(apple))
+
+# Linear Model: Estimating the effects of treatment factors
+model1 <- lm(rating ~ A*B, data = apple)
+summary(model1)
+
+# Factor level comparisons
+levels(apple$A)
+levels(apple$B)
+
+fit.contrast(model1, "A", coeff = c(1, -1, 0, 0))
+fit.contrast(model1, "A", coeff = c(1, 0, -1, 0))
+fit.contrast(model1, "A", coeff = c(1, 0, 0, -1))
+fit.contrast(model1, "B", coeff = c(1, -1, 0))
+fit.contrast(model1, "B", coeff = c(1, 0, -1))
+fit.contrast(model1, "B", coeff = c(0, 1, -1))
+
+# ANOVA to test significance of factors
+anov1 <- aov(rating ~ A + B, data = apple)
+summary(anov1)
+
+# Checking assumptions
+plot(anov1)  # Linearity check
+plot(model1, which = 1)  # Linearity violated
+
+ncvTest(model1)  # Constant variance
+shapiro.test(model1$residuals)  # Normality
+
+# Box-Cox transformation for normality
+bc <- boxcox(anov1)
+lambda <- bc$x[which.max(bc$y)]
+
+# Log transformation
+apple$lograting <- log(apple$rating)
+
+# ANOVA with transformed data
+anov3 <- aov(lograting ~ A + B, data = apple)
+summary(anov3)
+plot(anov3)
+
+# Boxplots for factors
+boxplot_A <- ggplot(apple, aes(x = A, y = rating)) +
+  geom_boxplot(fill = "lightblue", color = "black") +
+  labs(title = "Boxplot of Pretreatment Solution", x = "Pretreatment Solution", y = "Rating") +
+  theme_minimal()
+
+boxplot_B <- ggplot(apple, aes(x = B, y = rating)) +
+  geom_boxplot(fill = "lightgreen", color = "black") +
+  labs(title = "Boxplot of Storage Container", x = "Storage Container", y = "Rating") +
+  theme_minimal()
+
+# Display boxplots
+boxplot_A
+boxplot_B
+
+# Interaction plot
+with(apple, interaction.plot(A, B, rating, type = "b", pch = c(18, 24, 22), leg.bty = "o", 
+                             main = "Interaction Plot of Factor A and Factor B", xlab = "Factor A", ylab = "Rating"))
+
+# Effects model for factor interaction
+model_effects <- lm(rating ~ A + B + A:B, data = apple)
+summary(model_effects)
+
+# ANOVA for effects model
+Anova(model_effects, type = "III")
+
+# Power analysis for number of replicates
+rmin <- 2
+rmax <- 12
+alpha <- 0.05
+sigma <- 3.123421
+nlev <- c(4, 3)
+Delta <- 10
+
+power <- Fpower2(alpha, nlev, c(rmin:rmax), Delta, sigma)
+power
+
+# RCB ANOVA
+model2 <- aov(rating ~ Block + A + B, data = apple)
+summary(model2)
+
+# Polynomial contrast for factors
+contrasts(apple$A) <- contr.poly(4)
+contrasts(apple$B) <- contr.poly(3)
+
+# Fit ANOVA model with contrasts
+model <- aov(rating ~ A + B, data = apple)
+summary.aov(model, split = list(A = list("Linear" = 1, "Quadratic" = 2, "Cubic" = 3, "Quartic" = 4)))
+summary.aov(model, split = list(B = list("Linear" = 1, "Quadratic" = 2, "Cubic" = 3, "Quartic" = 4)))
+
+# Visualize the relationship between rating and Factor A
+R_A <- aggregate(rating ~ A, data = apple, FUN = mean)
+x_A <- as.double(as.numeric(levels(R_A$A)))
+y_A <- R_A$rating
+plot(x_A, y_A, xlab = "A", ylab = "Rating", main = "Relationship between Rating and Factor A")
+rate_quadratic_A <- lm(y_A ~ poly(x_A, 2)) 
+lines(seq(0, 3, 1), predict(rate_quadratic_A, data.frame(x = seq(0, 3, 1))), col = "blue")
+
+# Visualize the relationship between rating and Factor B
+R_B <- aggregate(rating ~ B, data = apple, FUN = mean)
+x_B <- as.double(as.numeric(levels(R_B$B)))
+y_B <- R_B$rating
+plot(x_B, y_B, xlab = "B", ylab = "Rating", main = "Relationship between Rating and Factor B")
+rate_quadratic_B <- lm(y_B ~ poly(x_B, 2))
+lines(seq(0, 2, 1), predict(rate_quadratic_B, data.frame(x = seq(0, 2, 1))), col = "blue")
+
+# Calculate blocking effectiveness
+sigma2CRD <- (2.63 + 72.38) / (12 * (4 - 1))
+sigmaRCB <- 4.83
+nuRCB <- 33
+nuCRD <- 36
+
+RE <- ((nuRCB + 1) * (nuCRD + 3) * sigma2CRD) / ((nuRCB + 3) * (nuCRD + 1) * sigmaRCB)
+RE
+
+# Number of blocks analysis
+bmin <- 2
+bmax <- 12
+alpha <- 0.05
+sigma2 <- 4.83
+css <- 149.37
+nu1 <- 5 - 1
+blocks <- c(bmin:bmax)
+nu2 <- (blocks - 1) * nu1
+nc <- (blocks * css) / sigma2
+Power <- Fpower(alpha, nu1, nu2, nc)
+data.frame(blocks, nu1, nu2, nc, Power)
+
+# ANOVA for blocked design
+model1 <- aov(rating ~ Block + A * B, data = apple)
+summary(model1)
+plot_model(model1, type = "int")
+
+# Interaction plot
+interaction.plot(x.factor = apple$A, trace.factor = apple$B, response = apple$rating, type = "b", pch = c(24, 22), leg.bty = "o")
+
+# Mixed-effects model for variance components
+model <- lmer(rating ~ 1 + A + B + A:B + (1|Block), data = apple, contrasts = list(A = contr.sum, B = contr.sum))
+summary(model)
+
+# Confidence intervals
+vci(confl = 0.95, c1 = 0.05, ms1 = 49.46, nu1 = 3, c2 = 0.05, ms2 = 0.89, nu2 = 2)
+
+# Partial confounding factors
+apple$Temperature <- cut(apple$rating, breaks = c(0, 3, 6, 9, Inf), labels = c("Low", "Medium", "High", "Very High"))
+apple1 <- apple[, c("rating", "A", "B", "Block", "Temperature")]
+
+modf2 <- lm(rating ~ Block + A + B + Temperature + A:B, data = apple1, contrasts = list(A = contr.sum, B = contr.sum, Temperature = contr.sum, Block = contr.sum))
+summary(modf2)
+Anova(modf2, type = "III")
+
+```
